@@ -1,0 +1,5 @@
+pandas
+numpy>=1.11
+thrift>=0.10.0
+six
+cython
