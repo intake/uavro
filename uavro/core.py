@@ -46,7 +46,7 @@ def map_types(header, schema):
         # should bother with root record's name and namespace?
         if isinstance(entry['type'], dict):
             entry['type'] = entry['type']['type']
-        if 'logicalType' in entry:
+        elif 'logicalType' in entry:
             lt = entry['logicalType']
             if lt == 'decimal':
                 t = np.dtype('float64')
@@ -55,7 +55,9 @@ def map_types(header, schema):
             elif lt.startswith('timestamp-') or lt == 'date':
                 t = np.dtype('datetime64')
             elif lt == 'duration':
-                t = np.dtype("O")  # three-element tuples/arrays
+                t = np.dtype('S12')  # don't bother converting
+        elif entry['type'] == 'fixed':
+            t = np.dtype("S%s" % entry['size'])
         else:
             t = typemap.get(entry['type'], np.dtype("O"))
         types[entry['name']] = t
@@ -153,6 +155,15 @@ def read(fn):
 
     df, arrs = empty(head['dtypes'].values(), head['nrows'],
                      cols=head['dtypes'])
+
+    for entry in head['schema']['fields']:
+        # temporary array for decimal
+        if entry.get('logicalType', None) == 'decimal':
+            if entry['type'] == 'fixed':
+                arrs[entry['name']] = np.empty(head['nrows'],
+                                               'S%s' % entry['size'])
+            else:
+                arrs[entry['name']] = np.empty(head['nrows'], "O")
     off = 0
 
     for block in head['blocks']:
@@ -160,6 +171,22 @@ def read(fn):
         data = f.read(block['size'])
         read_block_bytes(data, block, head, arrs, off)
         off += block['nrows']
+
+    for entry in head['schema']['fields']:
+        # logical conversions
+        lt = entry.get('logicalType', None)
+        if lt.endswith('millis'):
+            arrs[entry['name']] *= 1000000
+        elif lt.endswith('micros'):
+            arrs[entry['name']] *= 1000
+        elif lt == 'date':
+            arrs[entry['name']] *= 1000000000 * 24 * 3600
+        elif lt == 'decimal':
+            # https://avro.apache.org/docs/1.8.2/spec.html#Decimal
+            # fails on py2
+            scale = 10**-entry['scale']
+            df[entry['name']].values[:] = [int.from_bytes(b, 'big') * scale
+                                           for b in arrs[entry['name']]]
     return df
 
 

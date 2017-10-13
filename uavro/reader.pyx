@@ -86,7 +86,7 @@ cdef bytes read_bytes(bytesIO data):
     return out
 
 
-cpdef read(arrs, data, schema, int nrows, int off=0):
+def read(arrs, data, schema, int nrows, int off=0):
     cdef int ncols
     cdef list types, arr
     cdef bytesIO f
