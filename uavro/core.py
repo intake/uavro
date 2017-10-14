@@ -149,11 +149,15 @@ def read_block_bytes(data, block, head, arrs, off):
 
 
 def read(fn):
+    """Simple entry point: read a file, output dataframe"""
     f = open(fn, 'rb')
     file_size = os.path.getsize(fn)
     head = read_header(f)
-    scan_blocks(f, head, file_size)
+    return filelike_to_dataframe(f, file_size, head)
 
+
+def make_empty(head):
+    """Pre-assign dataframe to put values into"""
     cats = {e['name']: e['symbols'] for e in head['schema']['fields']
             if e['type'] == 'enum'}
     df, arrs = empty(head['dtypes'].values(), head['nrows'],
@@ -167,6 +171,27 @@ def read(fn):
                                                'S%s' % entry['size'])
             else:
                 arrs[entry['name']] = np.empty(head['nrows'], "O")
+    return df, arrs
+
+
+def filelike_to_dataframe(f, size, head):
+    """Read bytes, make dataframe
+
+    The intent is to be able to pass a real file, or any file-like object,
+    including BytesIO.
+
+    Parameters
+    ----------
+    f: file-like instance
+    size: int
+        Number of bytes to read, often the whole available
+    head: dict
+        Parsed header information relating to this data. This allows for
+        reading from bytes blocks part-way through a file.
+    """
+    scan_blocks(f, head, size)
+
+    df, arrs = make_empty(head)
     off = 0
 
     for block in head['blocks']:
@@ -176,6 +201,11 @@ def read(fn):
         read_block_bytes(data, block, head, arrs, off)
         off += block['nrows']
 
+    convert_types(head, arrs, df)
+    return df
+
+
+def convert_types(head, arrs, df):
     for entry in head['schema']['fields']:
         # logical conversions
         lt = entry.get('logicalType', '')
@@ -196,7 +226,7 @@ def read(fn):
             scale = 10**-entry['scale']
             df[entry['name']].values[:] = [int.from_bytes(b, 'big') * scale
                                            for b in arrs[entry['name']]]
-    return df
+
 
 
 decompress = {b'snappy': lambda d: snappy.decompress(d[:-4]),
