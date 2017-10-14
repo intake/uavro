@@ -86,12 +86,20 @@ cdef bytes read_bytes(bytesIO data):
     return out
 
 
+cdef bytes read_fixed(bytesIO data, size):
+    cdef bytes out
+    out = data.data()[:size]
+    data.advance(size)
+    return out
+
+
 def read(arrs, data, schema, int nrows, int off=0):
     cdef int ncols
     cdef list types, arr
     cdef bytesIO f
     ncols = len(arrs)
     types = [s['type'] for s in schema]
+    sizes = [s.get('size', 0) for s in schema]
     arr = [arrs[s['name']] for s in schema]
     f = bytesIO(data)
     for i in range(off, nrows + off):
@@ -101,6 +109,10 @@ def read(arrs, data, schema, int nrows, int off=0):
                 arr[j][i] = read_int(f)
             elif t == 'int':
                 arr[j][i] = read_int(f)
+            elif t == 'enum':
+                arr[j][i] = read_int(f)
+            elif t == 'float':
+                arr[j][i] = read_float(f)
             elif t == 'double':
                 arr[j][i] = read_double(f)
             elif t == 'string':
@@ -109,5 +121,7 @@ def read(arrs, data, schema, int nrows, int off=0):
                 arr[j][i] = read_bytes(f)
             elif t == 'bool':
                 arr[j][i] = read_bool(f)
+            elif t == 'fixed':
+                arr[j][i] = read_fixed(f, sizes[j])
             else:
-                raise ValueError()
+                raise ValueError(t)

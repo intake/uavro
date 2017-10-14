@@ -36,7 +36,8 @@ typemap = {
     'int': np.dtype('int32'),
     'long': np.dtype('int64'),
     'float': np.dtype('float32'),
-    'double': np.dtype('float64')
+    'double': np.dtype('float64'),
+    'enum': 'category'
 }
 
 
@@ -45,8 +46,8 @@ def map_types(header, schema):
     for entry in schema['fields']:
         # should bother with root record's name and namespace?
         if isinstance(entry['type'], dict):
-            entry['type'] = entry['type']['type']
-        elif 'logicalType' in entry:
+            entry.update(entry['type'])
+        if 'logicalType' in entry:
             lt = entry['logicalType']
             if lt == 'decimal':
                 t = np.dtype('float64')
@@ -153,8 +154,10 @@ def read(fn):
     head = read_header(f)
     scan_blocks(f, head, file_size)
 
+    cats = {e['name']: e['symbols'] for e in head['schema']['fields']
+            if e['type'] == 'enum'}
     df, arrs = empty(head['dtypes'].values(), head['nrows'],
-                     cols=head['dtypes'])
+                     cols=head['dtypes'], cats=cats)
 
     for entry in head['schema']['fields']:
         # temporary array for decimal
@@ -169,18 +172,24 @@ def read(fn):
     for block in head['blocks']:
         f.seek(block['doffset'])
         data = f.read(block['size'])
+        arrs = {k: v for (k, v) in arrs.items() if not k.endswith('-catdef')}
         read_block_bytes(data, block, head, arrs, off)
         off += block['nrows']
 
     for entry in head['schema']['fields']:
         # logical conversions
-        lt = entry.get('logicalType', None)
+        lt = entry.get('logicalType', '')
         if lt.endswith('millis'):
-            arrs[entry['name']] *= 1000000
+            a = arrs[entry['name']].view('int64')
+            a *= 1000000
         elif lt.endswith('micros'):
-            arrs[entry['name']] *= 1000
+            a = arrs[entry['name']].view('int64')
+            a *= 1000
         elif lt == 'date':
-            arrs[entry['name']] *= 1000000000 * 24 * 3600
+            # https://avro.apache.org/docs/1.8.2/spec.html#Date
+            # says days since 1970, but fastparquet uses fromordinal
+            a = arrs[entry['name']].view('int64')
+            a *= 1000000000 * 24 * 3600
         elif lt == 'decimal':
             # https://avro.apache.org/docs/1.8.2/spec.html#Decimal
             # fails on py2
@@ -193,4 +202,3 @@ def read(fn):
 decompress = {b'snappy': lambda d: snappy.decompress(d[:-4]),
               b'deflate': lambda d: zlib.decompress(d, -15),
               b'null': lambda d: d}
-
