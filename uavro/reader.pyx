@@ -49,6 +49,8 @@ cdef int64_t read_int(bytesIO data):
     while True:
         byte = data.data()[0]
         data.advance(1)
+        # need cast to long for bigger numbers; don't think this
+        # hurts performance, but could have separate 32-bit version
         result |= <long>(byte & 0x7f) << shift
         shift += 7
         if byte >> 7 == 0:
@@ -87,6 +89,7 @@ cdef bytes read_bytes(bytesIO data):
 
 
 cdef bytes read_fixed(bytesIO data, size):
+    # this could be a direct copy
     cdef bytes out
     out = data.data()[:size]
     data.advance(size)
@@ -105,6 +108,8 @@ def read(arrs, data, schema, int nrows, int off=0):
     for i in range(off, nrows + off):
         for j in range(ncols):
             t = types[j]
+            # could pass pointers and assign directly, and
+            # make functions inline
             if t == 'long':
                 arr[j][i] = read_int(f)
             elif t == 'int':
