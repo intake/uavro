@@ -48,6 +48,11 @@ def map_types(header, schema):
         # should bother with root record's name and namespace?
         if isinstance(entry['type'], dict):
             entry.update(entry['type'])
+        if entry['type'] in ['record', 'array', 'map']:
+            # TODO: as with fastparquet, would not be too bad to implement
+            # one-level map/array or non-repetead, flattenable records.
+            raise ValueError('uavro cannot read schemas containing '
+                             'nested/repeated data types.')
         if 'logicalType' in entry:
             lt = entry['logicalType']
             if lt == 'decimal':
