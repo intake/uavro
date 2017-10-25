@@ -4,7 +4,10 @@ import io
 import json
 import numpy as np
 import os
-import snappy
+try:
+    import snappy
+except ImportError:
+    snappy = None
 import zlib
 
 from . import reader
