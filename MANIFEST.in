@@ -1,5 +1,5 @@
-recursive-include fastparquet *.py
-recursive-include fastparquet *.pyx
+recursive-include uavro *.py
+recursive-include uavro *.pyx
 recursive-include docs *.rst
 
 include setup.py
