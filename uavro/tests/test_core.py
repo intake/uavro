@@ -1,16 +1,17 @@
 import json
 import os
 import pytest
-from uavro.core import read
+from uavro.core import read, dask_read_avro
 from uavro.tests.util import pdata, ldata, t
 
 here = os.path.dirname(__file__)
+fn = os.path.join(here, 'twitter.avro')
+expected = [json.loads(l) for l in open(os.path.join(here, 'twitter.json'))]
 
 
 def test_basic():
     # https://github.com/miguno/avro-cli-examples/
-    out = read(os.path.join(here, 'twitter.avro'))
-    expected = [json.loads(l) for l in open(os.path.join(here, 'twitter.json'))]
+    out = read(fn)
     assert out.to_dict(orient='records') == expected
 
 
@@ -44,3 +45,10 @@ def test_logical():
     assert out.iloc[0, 0].microsecond % 1000 == 0  # ms resolution
     assert out.iloc[0, 1].microsecond == t.microsecond  # us resolution
     assert (abs(out.f - 0.123) < 0.0001).all()
+
+
+def test_with_dask():
+    pytest.importorskip('dask.dataframe')
+    df = dask_read_avro([fn, fn])
+    out = df.compute()
+    assert out.to_dict(orient='records') == expected * 2

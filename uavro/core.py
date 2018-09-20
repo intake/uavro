@@ -248,7 +248,7 @@ decompress = {b'snappy': lambda d: snappy.decompress(d[:-4]),
 
 
 def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
-                   **kwargs):
+                   storage_options=None):
     """Read set of avro files into dask dataframes
 
     Use this only with avro schema that make sense as tabular data, i.e.,
@@ -256,7 +256,7 @@ def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
 
     Parameters
     ----------
-    urlpath: string
+    urlpath: string or list
         Absolute or relative filepath, URL (may include protocols like
         ``s3://``), or globstring pointing to data.
     block_finder: auto|scan|seek|none
@@ -269,33 +269,37 @@ def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
             scan.
     blocksize: int
         maybe used by the block-finder (see above)
+    storage_options: dict or None
+        passed to backend file-system
     """
     from dask import delayed
-    from dask.bytes.core import get_fs_paths_myopen
+    from dask.bytes.core import get_fs_token_paths, open_files
     from dask.bytes.utils import seek_delimiter
     from dask.dataframe import from_delayed
 
     if block_finder not in ['auto', 'scan', 'seek', 'none']:
         raise ValueError("block_finder must be in ['auto', 'scan', 'seek',"
                          " 'none'], got %s" % block_finder)
-    fs, paths, myopen = get_fs_paths_myopen(urlpath, None, 'rb', None, **kwargs)
+    fs, fs_token, paths = get_fs_token_paths(urlpath, 'rb',
+                                             storage_options=storage_options)
+    files = open_files(urlpath, **(storage_options or {}))
     chunks = []
     dread = delayed(dask_read_chunk)
     head = None
-    for path in paths:
+    for fo in files:
         if head is None:
             # sample first file
-            with myopen(path, 'rb') as f:
+            with fo as f:
                 head = read_header(f)
-        size = fs.size(path)
+        size = fs.size(fo.path)
         b_to_s = blocksize / head['first_block_bytes']
         if (block_finder == 'none' or blocksize > 0.9 * size or
                 head['first_block_bytes'] > 0.9 * size):
             # one chunk per file
-            chunks.append(dread(path, myopen, 0, size, head))
+            chunks.append(dread(fo, 0, size, head))
         elif block_finder == 'scan' or (block_finder == 'auto' and b_to_s < 0.2):
             # hop through file pick blocks ~blocksize apart, append to chunks
-            with myopen(path, 'rb') as f:
+            with fo as f:
                 head['blocks'] = []
                 scan_blocks(f, head, size)
             blocks = head['blocks']
@@ -307,21 +311,21 @@ def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
                 loc += o['size'] + SYNC_SIZE
                 nrows += o['nrows']
                 if loc - loc0 > blocksize:
-                    chunks.append(dread(path, myopen, loc0, loc - loc0, head,
-                                       scan=False))
+                    chunks.append(dread(fo, loc0, loc - loc0, head,
+                                        scan=False))
                     loc0 = loc
                     nrows = 0
-            chunks.append(dread(path, myopen, loc0, size - loc0, head,
+            chunks.append(dread(fo, loc0, size - loc0, head,
                                 scan=False))
         else:
             # block-seek case: find sync markers
             loc0 = head['header_size']
-            with myopen(path, 'rb') as f:
+            with fo as f:
                 while True:
                     f.seek(blocksize, 1)
                     seek_delimiter(f, head['sync'], head['first_block_bytes']*4)
                     loc = f.tell()
-                    chunks.append(dread(path, myopen, loc0, loc - loc0, head))
+                    chunks.append(dread(fo, loc0, loc - loc0, head))
                     if f.tell() >= size:
                         break
                     loc0 = loc
@@ -329,8 +333,8 @@ def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
                         divisions=[None] * (len(chunks) + 1))
 
 
-def dask_read_chunk(path, myopen, offset, size, head, scan=True):
-    with myopen(path, 'rb') as f:
+def dask_read_chunk(fo, offset, size, head, scan=True):
+    with fo as f:
         f.seek(offset)
         data = f.read(size)
     return filelike_to_dataframe(io.BytesIO(data), size, head, scan=scan)
