@@ -47,8 +47,21 @@ def test_logical():
     assert (abs(out.f - 0.123) < 0.0001).all()
 
 
-def test_with_dask():
+def test_with_dask_chunk():
     pytest.importorskip('dask.dataframe')
-    df = dask_read_avro([fn, fn])
+    N = 100
+    df = dask_read_avro([fn] * N)
     out = df.compute()
-    assert out.to_dict(orient='records') == expected * 2
+    assert out.to_dict(orient='records') == expected * N
+    df = dask_read_avro([fn] * N, blocksize=1000)
+    assert df.npartitions > 2
+    out = df.compute()
+    assert out.to_dict(orient='records') == expected * N
+
+
+def test_with_dask_file():
+    pytest.importorskip('dask.dataframe')
+    N = 100
+    df = dask_read_avro([fn] * N, blocksize=None)
+    out = df.compute()
+    assert out.to_dict(orient='records') == expected * N

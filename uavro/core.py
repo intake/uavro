@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import copy
 from fastparquet.dataframe import empty
 import io
 import json
@@ -7,7 +8,10 @@ import os
 try:
     import snappy
 except ImportError:
-    snappy = None
+    class Dummy:
+        def __getattr__(self, item):
+            raise RuntimeError('Snappy is not installed')
+    snappy = Dummy()
 import zlib
 
 from . import reader
@@ -81,6 +85,10 @@ def read_header(fo):
         This should be in bytes mode, e.g., io.BytesIO
 
     Returns dict representing the header
+
+    Parameters
+    ----------
+    fo: file-like
     """
     assert fo.read(len(MAGIC)) == MAGIC, 'Magic avro bytes missing'
     meta = {}
@@ -103,6 +111,12 @@ def read_header(fo):
     out['head_bytes'] = fo.read(out['header_size'])
     peek_first_block(fo, out)
     return out
+
+
+def open_head(fn):
+    """Open a file just to read its head"""
+    with copy.copy(fn) as f:
+        return read_header(f)
 
 
 def peek_first_block(fo, out):
@@ -152,7 +166,7 @@ def scan_blocks(fo, header, file_size):
 
 
 def read_block_bytes(data, block, head, arrs, off):
-    codec = head['meta'].get('avro.codec', b'null')
+    codec = head.get('meta', {}).get('avro.codec', b'null')
     data = decompress[codec](data)
     reader.read(arrs, data, head['schema']['fields'], block['nrows'], off)
 
@@ -192,7 +206,7 @@ def filelike_to_dataframe(f, size, head, scan=True):
     Parameters
     ----------
     f: file-like instance
-    size: int
+    size: int or None
         Number of bytes to read, often the whole available
     head: dict
         Parsed header information relating to this data. This allows for
@@ -241,14 +255,12 @@ def convert_types(head, arrs, df):
                                            for b in arrs[entry['name']]]
 
 
-
 decompress = {b'snappy': lambda d: snappy.decompress(d[:-4]),
               b'deflate': lambda d: zlib.decompress(d, -15),
               b'null': lambda d: d}
 
 
-def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
-                   storage_options=None):
+def dask_read_avro(urlpath, blocksize=100000000, storage_options=None):
     """Read set of avro files into dask dataframes
 
     Use this only with avro schema that make sense as tabular data, i.e.,
@@ -259,82 +271,59 @@ def dask_read_avro(urlpath, block_finder='auto', blocksize=100000000,
     urlpath: string or list
         Absolute or relative filepath, URL (may include protocols like
         ``s3://``), or globstring pointing to data.
-    block_finder: auto|scan|seek|none
-        Method for chunking avro files.
-        - scan: read the first bytes of every block to find the size of all
-            blocks and therefore the boundaries
-        - seek: find the block delimiter bytestring every blocksize bytes
-        - none: do not chunk files, parallelism will be only across files
-        - auto: use seek if the first block is larger than 0.2*blocksize, else
-            scan.
-    blocksize: int
-        maybe used by the block-finder (see above)
+    blocksize: int or None
+        Size of chunks in bytes. If None, there will be no chunking and each
+        file will become one partition.
     storage_options: dict or None
         passed to backend file-system
     """
-    from dask import delayed
-    from dask.bytes.core import get_fs_token_paths, open_files
-    from dask.bytes.utils import seek_delimiter
+    from dask import delayed, compute
+    from dask.bytes.core import open_files, read_bytes
     from dask.dataframe import from_delayed
 
-    if block_finder not in ['auto', 'scan', 'seek', 'none']:
-        raise ValueError("block_finder must be in ['auto', 'scan', 'seek',"
-                         " 'none'], got %s" % block_finder)
-    fs, fs_token, paths = get_fs_token_paths(urlpath, 'rb',
-                                             storage_options=storage_options)
-    files = open_files(urlpath, **(storage_options or {}))
-    chunks = []
-    dread = delayed(dask_read_chunk)
-    head = None
-    for fo in files:
-        if head is None:
-            # sample first file
-            with fo as f:
-                head = read_header(f)
-        size = fs.size(fo.path)
-        b_to_s = blocksize / head['first_block_bytes']
-        if (block_finder == 'none' or blocksize > 0.9 * size or
-                head['first_block_bytes'] > 0.9 * size):
-            # one chunk per file
-            chunks.append(dread(fo, 0, size, head))
-        elif block_finder == 'scan' or (block_finder == 'auto' and b_to_s < 0.2):
-            # hop through file pick blocks ~blocksize apart, append to chunks
-            with fo as f:
-                head['blocks'] = []
-                scan_blocks(f, head, size)
-            blocks = head['blocks']
-            head['blocks'] = []
-            loc0 = head['header_size']
-            loc = loc0
-            nrows = 0
-            for o in blocks:
-                loc += o['size'] + SYNC_SIZE
-                nrows += o['nrows']
-                if loc - loc0 > blocksize:
-                    chunks.append(dread(fo, loc0, loc - loc0, head,
-                                        scan=False))
-                    loc0 = loc
-                    nrows = 0
-            chunks.append(dread(fo, loc0, size - loc0, head,
-                                scan=False))
-        else:
-            # block-seek case: find sync markers
-            loc0 = head['header_size']
-            with fo as f:
-                while True:
-                    f.seek(blocksize, 1)
-                    seek_delimiter(f, head['sync'], head['first_block_bytes']*4)
-                    loc = f.tell()
-                    chunks.append(dread(fo, loc0, loc - loc0, head))
-                    if f.tell() >= size:
-                        break
-                    loc0 = loc
-    return from_delayed(chunks, meta=head['dtypes'],
-                        divisions=[None] * (len(chunks) + 1))
+    storage_options = storage_options or {}
+    files = open_files(urlpath, **storage_options)
+    with copy.copy(files[0]) as f:
+        # we assume the same header for all files
+        head = read_header(f)
+    storage_options = storage_options or {}
+    files = open_files(urlpath, **storage_options)
+    if blocksize is not None:
+        dhead = delayed(open_head)
+        heads = compute(*[dhead(f) for f in files])
+        dread = delayed(dask_read_chunk)
+        bits = []
+        for head, f in zip(heads, files):
+            _, chunks = read_bytes(f.path, sample=False, blocksize=blocksize,
+                                   delimiter=head['sync'], include_path=False,
+                                   **storage_options)
+            bits.extend([dread(ch, head) for ch in chunks[0]])
+        return from_delayed(bits)
+    else:
+        files = open_files(urlpath, **storage_options)
+        dread = delayed(dask_read_file)
+        chunks = [dread(fo) for fo in files]
+        return from_delayed(chunks)
 
 
-def dask_read_chunk(fo, offset, size, head, scan=True):
+def dask_read_chunk(chunk, head):
+    """Get dataframe from row bytes block"""
+    head_bytes = head['head_bytes']
+    if not chunk.startswith(head_bytes):
+        chunk = head_bytes + chunk
+    i = io.BytesIO(chunk)
+    scan_blocks(i, head, len(chunk))
+    i.seek(0)
+    return filelike_to_dataframe(i, None, head, scan=False)
+
+
+def dask_read_file(fo):
+    """Get dataframe from file-like"""
     with fo as f:
-        f.seek(offset)
-        data = f.read(size)
-    return filelike_to_dataframe(io.BytesIO(data), size, head, scan=scan)
+        i = io.BytesIO(f.read())
+        size = f.tell()
+    head = read_header(i)
+    i.seek(0)
+    scan_blocks(i, head, size)
+    i.seek(0)
+    return filelike_to_dataframe(i, None, head, scan=False)
