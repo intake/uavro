@@ -22,7 +22,7 @@ else:
 
 setup(
     name='uavro',
-    version='0.0.3',
+    version='0.1.1',
     description='Cython-optimized reader for tabular Avro data',
     author='Martin Durant',
     author_email='mdurant@continuum.io',
@@ -39,6 +39,7 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: Implementation :: CPython',
     ],
     packages=['uavro'],

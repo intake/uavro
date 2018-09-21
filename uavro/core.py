@@ -45,7 +45,8 @@ typemap = {
     'long': np.dtype('int64'),
     'float': np.dtype('float32'),
     'double': np.dtype('float64'),
-    'enum': 'category'
+    'enum': 'category',
+    'null': 'object'  # actually, always None; only used with union field
 }
 
 
