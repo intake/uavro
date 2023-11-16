@@ -17,9 +17,9 @@ def generate_test_data_primitive(fn):
                   {"name": "d", "type": "long"},
                   {"name": "e", "type": "float"},
                   {"name": "f", "type": "double"},
-                  {"name": "g", "type": {'type': "fixed", 'size': 4}},
+                  {"name": "g", "type": {'type': "fixed", 'size': 4, 'name': 'g'}},
                   {"name": "h", "type": {'type': "enum",
-                   "symbols": ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]}},
+                   "symbols": ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"], "name": "h"}},
                   ]
               }
     with open(fn, 'wb') as out:
@@ -48,7 +48,8 @@ def generate_test_data_logical(fn):
                   {"name": "e", "type": {'type': "int",
                       'logicalType': 'date'}},
                   {"name": "f", "type": {'type': "bytes",
-                      'logicalType': 'decimal', 'scale': 3}},
+                      'logicalType': 'decimal', 'scale': 3,
+                      'precision': 38}},
                   ]
               }
     with open(fn, 'wb') as out:

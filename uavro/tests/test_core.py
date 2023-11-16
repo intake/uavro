@@ -38,7 +38,6 @@ def test_primitive():
             assert out[k][0] == pdata[0][k]
 
 
-@pytest.mark.skip
 def test_logical():
     out = read(os.path.join(here, 'logical.avro'))
     assert len(out) == 1000
