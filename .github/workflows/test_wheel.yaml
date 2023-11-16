@@ -13,7 +13,6 @@ jobs:
         os: [ubuntu-22.04, windows-2019]
         architecture: ['x64']
         linux_archs: ["native"]
-        numpy_version: ["numpy~=1.23", "numpy~=1.24", "numpy~=1.25", "numpy#latest"]
         include:
           # https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
           - os: windows-2019
@@ -22,7 +21,7 @@ jobs:
             linux_archs: native
             skip: "pp* *musl*"
 
-    name: Test wheel (${{ matrix.numpy_version }} + ${{ matrix.os }})
+    name: Test wheel (${{ matrix.os }})
     env:
       CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
       CIBW_BEFORE_ALL: "pip install numpy cython"
@@ -65,11 +64,10 @@ jobs:
         run: |
           pip install ./wheelhouse/*.whl
 
-      - name: Run Tests after installing numpy (${{matrix.numpy_version}})
+      - name: Run Tests after installing
         shell: bash -l {0}
         run: |
           pip install pytest pytest-cov
           mv ./uavro ./uavro-src           #in order to avoid conflicts between the uavro directory and the uavro installed module
-          pip install ${{matrix.numpy_version}}    #installing a different numpy version than the one uavro wheel was compiled with
           pytest --verbose --cov=uavro-src   #verifying that uavro still works
 

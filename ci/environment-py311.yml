@@ -9,3 +9,6 @@ dependencies:
   - fastparquet
   - pytest
   - pytest-cov
+  - dask
+  - fsspec
+  - python-snappy
