@@ -29,7 +29,6 @@ jobs:
         shell: bash -l {0}
         run: |
           pip install -e . --no-deps
-          pip install dask fsspec python-snappy
 
       - name: Run Tests
         shell: bash -l {0}
@@ -55,7 +54,6 @@ jobs:
         shell: bash -l {0}
         run: |
           pip install -e . --no-deps
-          pip install dask fsspec python-snappy
 
       - name: Run Tests
         shell: bash -l {0}
