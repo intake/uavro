@@ -279,8 +279,9 @@ def dask_read_avro(urlpath, blocksize=100000000, storage_options=None):
         passed to backend file-system
     """
     from dask import delayed, compute
-    from dask.bytes.core import open_files, read_bytes
+    from dask.bytes.core import read_bytes
     from dask.dataframe import from_delayed
+    from fsspec import open_files
 
     storage_options = storage_options or {}
     files = open_files(urlpath, **storage_options)
